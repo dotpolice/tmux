@@ -234,7 +234,7 @@ int
 main(int argc, char **argv)
 {
 	struct passwd	*pw;
-	char		*s, *path, *label, *home, **var;
+	char		*s, *path, *label, *config, **var;
 	int	 	 opt, flags, quiet, keys;
 
 #if defined(DEBUG) && defined(__OpenBSD__)
@@ -354,13 +354,21 @@ main(int argc, char **argv)
 
 	/* Locate the configuration file. */
 	if (cfg_file == NULL) {
-		home = getenv("HOME");
-		if (home == NULL || *home == '\0') {
-			pw = getpwuid(getuid());
-			if (pw != NULL)
-				home = pw->pw_dir;
+		// Try $XDG_CONFIG_DIR/tmux/config first.
+ 		config = getenv("XDG_CONFIG_HOME");
+ 		if (config != NULL && *config != '\0')
+ 			xasprintf(&cfg_file, "%s/%s", config, DEFAULT_CFG_PATH);
+		// Then look in the HOME directory.
+ 		else {
+ 			config = getenv("HOME");
+ 			if (config == NULL || *config == '\0') {
+				// Finally, look in the working directory.
+ 				pw = getpwuid(getuid());
+ 				if (pw != NULL)
+ 					config = pw->pw_dir;
+ 			}
+ 			xasprintf(&cfg_file, "%s/%s", config, DEFAULT_CFG_FILE);
 		}
-		xasprintf(&cfg_file, "%s/%s", home, DEFAULT_CFG);
 		if (access(cfg_file, R_OK) != 0 && errno == ENOENT) {
 			free(cfg_file);
 			cfg_file = NULL;

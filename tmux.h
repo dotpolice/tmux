@@ -40,7 +40,8 @@ extern char    *__progname;
 extern char   **environ;
 
 /* Default configuration files. */
-#define DEFAULT_CFG ".tmux.conf"
+#define DEFAULT_CFG_PATH "tmux/config"
+#define DEFAULT_CFG_FILE ".tmux.conf"
 #define SYSTEM_CFG "/etc/tmux.conf"
 
 /* Default prompt history length. */
