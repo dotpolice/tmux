@@ -26,13 +26,13 @@
  * Create a new window.
  */
 
-int	cmd_new_window_exec(struct cmd *, struct cmd_ctx *);
+enum cmd_retval	cmd_new_window_exec(struct cmd *, struct cmd_ctx *);
 
 const struct cmd_entry cmd_new_window_entry = {
 	"new-window", "neww",
 	"ac:dF:kn:Pt:", 0, 1,
 	"[-adkP] [-c start-directory] [-F format] [-n window-name] "
-	"[-t target-window] [command]",
+	CMD_TARGET_WINDOW_USAGE " [command]",
 	0,
 	NULL,
 	NULL,

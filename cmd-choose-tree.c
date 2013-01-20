@@ -39,8 +39,8 @@ void	cmd_choose_tree_free(struct window_choose_data *);
 
 const struct cmd_entry cmd_choose_tree_entry = {
 	"choose-tree", NULL,
-	"S:W:swb:c:t:", 0, 1,
-	"[-sw] [-b session-template] [-c window template] [-S format] " \
+	"S:W:swub:c:t:", 0, 1,
+	"[-swu] [-b session-template] [-c window template] [-S format] " \
 	"[-W format] " CMD_TARGET_WINDOW_USAGE,
 	0,
 	NULL,
@@ -219,6 +219,7 @@ windows_only:
 
 			free(final_win_action);
 		}
+
 		/*
 		 * If we're just drawing windows, don't consider moving on to
 		 * other sessions as we only list windows in this session.
@@ -231,6 +232,9 @@ windows_only:
 
 	window_choose_ready(wl->window->active, cur_win,
 		cmd_choose_tree_callback, cmd_choose_tree_free);
+
+	if (args_has(args, 'u'))
+		window_choose_expand_all(wl->window->active);
 
 	return (CMD_RETURN_NORMAL);
 }
@@ -257,5 +261,4 @@ cmd_choose_tree_free(struct window_choose_data *cdata)
 	free(cdata->command);
 	format_free(cdata->ft);
 	free(cdata);
-
 }

@@ -324,6 +324,9 @@ screen_write_parsestyle(
 			fg = defgc->fg;
 			bg = defgc->bg;
 			attr = defgc->attr;
+			flags &= ~(GRID_FLAG_FG256|GRID_FLAG_BG256);
+			flags |=
+			    defgc->flags & (GRID_FLAG_FG256|GRID_FLAG_BG256);
 		} else if (end > 3 && strncasecmp(tmp + 1, "g=", 2) == 0) {
 			if ((val = colour_fromstring(tmp + 3)) == -1)
 				return;
@@ -335,8 +338,11 @@ screen_write_parsestyle(
 					} else
 						flags &= ~GRID_FLAG_FG256;
 					fg = val;
-				} else
+				} else {
 					fg = defgc->fg;
+					flags &= ~GRID_FLAG_FG256;
+					flags |= defgc->flags & GRID_FLAG_FG256;
+				}
 			} else if (*in == 'b' || *in == 'B') {
 				if (val != 8) {
 					if (val & 0x100) {
@@ -345,8 +351,11 @@ screen_write_parsestyle(
 					} else
 						flags &= ~GRID_FLAG_BG256;
 					bg = val;
-				} else
+				} else {
 					bg = defgc->bg;
+					flags &= ~GRID_FLAG_BG256;
+					flags |= defgc->flags & GRID_FLAG_BG256;
+				}
 			} else
 				return;
 		} else if (end > 2 && strncasecmp(tmp, "no", 2) == 0) {
@@ -638,6 +647,30 @@ screen_write_deletecharacter(struct screen_write_ctx *ctx, u_int nx)
 
 	ttyctx.num = nx;
 	tty_write(tty_cmd_deletecharacter, &ttyctx);
+}
+
+/* Clear nx characters. */
+void
+screen_write_clearcharacter(struct screen_write_ctx *ctx, u_int nx)
+{
+	struct screen	*s = ctx->s;
+	struct tty_ctx	 ttyctx;
+
+	if (nx == 0)
+		nx = 1;
+
+	if (nx > screen_size_x(s) - s->cx)
+		nx = screen_size_x(s) - s->cx;
+	if (nx == 0)
+		return;
+
+	screen_write_initctx(ctx, &ttyctx, 0);
+
+	if (s->cx <= screen_size_x(s) - 1)
+		grid_view_clear(s->grid, s->cx, s->cy, nx, 1);
+
+	ttyctx.num = nx;
+	tty_write(tty_cmd_clearcharacter, &ttyctx);
 }
 
 /* Insert ny lines. */

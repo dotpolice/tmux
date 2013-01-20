@@ -90,6 +90,13 @@ const struct options_table_entry server_options_table[] = {
 
 /* Session options. */
 const struct options_table_entry session_options_table[] = {
+	{ .name = "assume-paste-time",
+	  .type = OPTIONS_TABLE_NUMBER,
+	  .minimum = 0,
+	  .maximum = INT_MAX,
+	  .default_num = 1,
+	},
+
 	{ .name = "base-index",
 	  .type = OPTIONS_TABLE_NUMBER,
 	  .minimum = 0,
@@ -509,13 +516,6 @@ const struct options_table_entry window_options_table[] = {
 	  .default_num = 0
 	},
 
-	{ .name = "layout-history-limit",
-	  .type = OPTIONS_TABLE_NUMBER,
-	  .minimum = 1,
-	  .maximum = USHRT_MAX,
-	  .default_num = 20
-	},
-
 	{ .name = "main-pane-height",
 	  .type = OPTIONS_TABLE_NUMBER,
 	  .minimum = 1,
@@ -683,6 +683,21 @@ const struct options_table_entry window_options_table[] = {
 	{ .name = "window-status-current-format",
 	  .type = OPTIONS_TABLE_STRING,
 	  .default_str = "#I:#W#F"
+	},
+
+	{ .name = "window-status-last-attr",
+	  .type = OPTIONS_TABLE_ATTRIBUTES,
+	  .default_num = 0
+	},
+
+	{ .name = "window-status-last-bg",
+	  .type = OPTIONS_TABLE_COLOUR,
+	  .default_num = 8
+	},
+
+	{ .name = "window-status-last-fg",
+	  .type = OPTIONS_TABLE_COLOUR,
+	  .default_num = 8
 	},
 
 	{ .name = "window-status-fg",

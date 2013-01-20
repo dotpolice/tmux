@@ -43,7 +43,6 @@ void	window_choose_scroll_down(struct window_pane *);
 void	window_choose_collapse(struct window_pane *, struct session *);
 void	window_choose_expand(struct window_pane *, struct session *, u_int);
 void	window_choose_collapse_all(struct window_pane *);
-void	window_choose_expand_all(struct window_pane *);
 
 enum window_choose_input_type {
 	WINDOW_CHOOSE_NORMAL = -1,
@@ -118,7 +117,6 @@ window_choose_ready(struct window_pane *wp, u_int cur,
 	ARRAY_CONCAT(&data->old_list, &data->list);
 
 	window_choose_collapse_all(wp);
-	window_choose_redraw_screen(wp);
 }
 
 struct screen *
@@ -623,7 +621,7 @@ window_choose_mouse(
 	struct window_choose_mode_item	*item;
 	u_int				 idx;
 
-	if ((m->b & 3) == 3)
+	if (~m->event & MOUSE_EVENT_CLICK)
 		return;
 	if (m->x >= screen_size_x(s))
 		return;
