@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $OpenBSD$ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -42,14 +42,6 @@ const struct {
 	{ "F10",	KEYC_F10 },
 	{ "F11",	KEYC_F11 },
 	{ "F12",	KEYC_F12 },
-	{ "F13",	KEYC_F13 },
-	{ "F14",	KEYC_F14 },
-	{ "F15",	KEYC_F15 },
-	{ "F16",	KEYC_F16 },
-	{ "F17",	KEYC_F17 },
-	{ "F18",	KEYC_F18 },
-	{ "F19",	KEYC_F19 },
-	{ "F20",	KEYC_F20 },
 	{ "IC",		KEYC_IC },
 	{ "DC",		KEYC_DC },
 	{ "Home",	KEYC_HOME },
@@ -90,6 +82,19 @@ const struct {
 	{ "KPEnter",	KEYC_KP_ENTER },
 	{ "KP0",	KEYC_KP_ZERO },
 	{ "KP.",	KEYC_KP_PERIOD },
+
+	/* Mouse keys. */
+	KEYC_MOUSE_STRING(MOUSEDOWN1, MouseDown1),
+	KEYC_MOUSE_STRING(MOUSEDOWN2, MouseDown2),
+	KEYC_MOUSE_STRING(MOUSEDOWN3, MouseDown3),
+	KEYC_MOUSE_STRING(MOUSEUP1, MouseUp1),
+	KEYC_MOUSE_STRING(MOUSEUP2, MouseUp2),
+	KEYC_MOUSE_STRING(MOUSEUP3, MouseUp3),
+	KEYC_MOUSE_STRING(MOUSEDRAG1, MouseDrag1),
+	KEYC_MOUSE_STRING(MOUSEDRAG2, MouseDrag2),
+	KEYC_MOUSE_STRING(MOUSEDRAG3, MouseDrag3),
+	KEYC_MOUSE_STRING(WHEELUP, WheelUp),
+	KEYC_MOUSE_STRING(WHEELDOWN, WheelDown),
 };
 
 /* Find key string in table. */
@@ -136,9 +141,10 @@ key_string_get_modifiers(const char **string)
 int
 key_string_lookup_string(const char *string)
 {
-	int	key, modifiers;
-	u_short	u;
-	int	size;
+	static const char	*other = "!#()+,-.0123456789:;<=>?'\r\t";
+	int			 key, modifiers;
+	u_short			 u;
+	int			 size;
 
 	/* Is this a hexadecimal value? */
 	if (string[0] == '0' && string[1] == 'x') {
@@ -170,7 +176,7 @@ key_string_lookup_string(const char *string)
 	}
 
 	/* Convert the standard control keys. */
-	if (key < KEYC_BASE && (modifiers & KEYC_CTRL)) {
+	if (key < KEYC_BASE && (modifiers & KEYC_CTRL) && !strchr(other, key)) {
 		if (key >= 97 && key <= 122)
 			key -= 96;
 		else if (key >= 64 && key <= 95)
@@ -193,13 +199,15 @@ key_string_lookup_key(int key)
 {
 	static char	out[24];
 	char		tmp[8];
-	u_int	   	i;
+	u_int		i;
 
 	*out = '\0';
 
 	/* Handle no key. */
 	if (key == KEYC_NONE)
-		return ("none");
+		return ("<NONE>");
+	if (key == KEYC_MOUSE)
+		return ("<MOUSE>");
 
 	/*
 	 * Special case: display C-@ as C-Space. Could do this below in

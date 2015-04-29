@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $OpenBSD$ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -18,7 +18,11 @@
 
 #include <sys/types.h>
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "tmux.h"
 
@@ -26,35 +30,33 @@
  * Create a new window.
  */
 
-enum cmd_retval	cmd_new_window_exec(struct cmd *, struct cmd_ctx *);
+#define NEW_WINDOW_TEMPLATE "#{session_name}:#{window_index}.#{pane_index}"
+
+enum cmd_retval	cmd_new_window_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_new_window_entry = {
 	"new-window", "neww",
-	"ac:dF:kn:Pt:", 0, 1,
+	"ac:dF:kn:Pt:", 0, -1,
 	"[-adkP] [-c start-directory] [-F format] [-n window-name] "
 	CMD_TARGET_WINDOW_USAGE " [command]",
 	0,
-	NULL,
-	NULL,
 	cmd_new_window_exec
 };
 
 enum cmd_retval
-cmd_new_window_exec(struct cmd *self, struct cmd_ctx *ctx)
+cmd_new_window_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args		*args = self->args;
 	struct session		*s;
 	struct winlink		*wl;
-	struct client		*c;
-	const char		*cmd, *cwd;
-	const char		*template;
-	char			*cause;
-	int			 idx, last, detached;
+	const char		*cmd, *path, *template;
+	char		       **argv, *cause, *cp;
+	int			 argc, idx, last, detached, cwd, fd = -1;
 	struct format_tree	*ft;
-	char			*cp;
+	struct environ_entry	*envent;
 
 	if (args_has(args, 'a')) {
-		wl = cmd_find_window(ctx, args_get(args, 't'), &s);
+		wl = cmd_find_window(cmdq, args_get(args, 't'), &s);
 		if (wl == NULL)
 			return (CMD_RETURN_ERROR);
 		idx = wl->idx + 1;
@@ -65,7 +67,7 @@ cmd_new_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 				break;
 		}
 		if (last == INT_MAX) {
-			ctx->error(ctx, "no free window indexes");
+			cmdq_error(cmdq, "no free window indexes");
 			return (CMD_RETURN_ERROR);
 		}
 
@@ -76,10 +78,56 @@ cmd_new_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 			server_unlink_window(s, wl);
 		}
 	} else {
-		if ((idx = cmd_find_index(ctx, args_get(args, 't'), &s)) == -2)
+		idx = cmd_find_index(cmdq, args_get(args, 't'), &s);
+		if (idx == -2)
 			return (CMD_RETURN_ERROR);
 	}
 	detached = args_has(args, 'd');
+
+	if (args->argc == 0) {
+		cmd = options_get_string(&s->options, "default-command");
+		if (cmd != NULL && *cmd != '\0') {
+			argc = 1;
+			argv = (char **)&cmd;
+		} else {
+			argc = 0;
+			argv = NULL;
+		}
+	} else {
+		argc = args->argc;
+		argv = args->argv;
+	}
+
+	path = NULL;
+	if (cmdq->client != NULL && cmdq->client->session == NULL)
+		envent = environ_find(&cmdq->client->environ, "PATH");
+	else
+		envent = environ_find(&s->environ, "PATH");
+	if (envent != NULL)
+		path = envent->value;
+
+	if (args_has(args, 'c')) {
+		ft = format_create();
+		format_defaults(ft, cmd_find_client(cmdq, NULL, 1), s, NULL,
+		    NULL);
+		cp = format_expand(ft, args_get(args, 'c'));
+		format_free(ft);
+
+		if (cp != NULL && *cp != '\0') {
+			fd = open(cp, O_RDONLY|O_DIRECTORY);
+			free(cp);
+			if (fd == -1) {
+				cmdq_error(cmdq, "bad working directory: %s",
+				    strerror(errno));
+				return (CMD_RETURN_ERROR);
+			}
+		} else if (cp != NULL)
+			free(cp);
+		cwd = fd;
+	} else if (cmdq->client != NULL && cmdq->client->session == NULL)
+		cwd = cmdq->client->cwd;
+	else
+		cwd = s->cwd;
 
 	wl = NULL;
 	if (idx != -1)
@@ -101,19 +149,14 @@ cmd_new_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 		}
 	}
 
-	if (args->argc == 0)
-		cmd = options_get_string(&s->options, "default-command");
-	else
-		cmd = args->argv[0];
-	cwd = cmd_get_default_path(ctx, args_get(args, 'c'));
-
 	if (idx == -1)
 		idx = -1 - options_get_number(&s->options, "base-index");
-	wl = session_new(s, args_get(args, 'n'), cmd, cwd, idx, &cause);
+	wl = session_new(s, args_get(args, 'n'), argc, argv, path, cwd, idx,
+		&cause);
 	if (wl == NULL) {
-		ctx->error(ctx, "create window failed: %s", cause);
+		cmdq_error(cmdq, "create window failed: %s", cause);
 		free(cause);
-		return (CMD_RETURN_ERROR);
+		goto error;
 	}
 	if (!detached) {
 		session_select(s, wl->idx);
@@ -126,18 +169,22 @@ cmd_new_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 			template = NEW_WINDOW_TEMPLATE;
 
 		ft = format_create();
-		if ((c = cmd_find_client(ctx, NULL)) != NULL)
-		    format_client(ft, c);
-		format_session(ft, s);
-		format_winlink(ft, s, wl);
-		format_window_pane(ft, wl->window->active);
+		format_defaults(ft, cmd_find_client(cmdq, NULL, 1), s, wl,
+		    NULL);
 
 		cp = format_expand(ft, template);
-		ctx->print(ctx, "%s", cp);
+		cmdq_print(cmdq, "%s", cp);
 		free(cp);
 
 		format_free(ft);
 	}
 
+	if (fd != -1)
+		close(fd);
 	return (CMD_RETURN_NORMAL);
+
+error:
+	if (fd != -1)
+		close(fd);
+	return (CMD_RETURN_ERROR);
 }

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $OpenBSD$ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -24,29 +24,18 @@
  * Rotate the panes in a window.
  */
 
-void		 cmd_rotate_window_key_binding(struct cmd *, int);
-enum cmd_retval	 cmd_rotate_window_exec(struct cmd *, struct cmd_ctx *);
+enum cmd_retval	 cmd_rotate_window_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_rotate_window_entry = {
 	"rotate-window", "rotatew",
 	"Dt:U", 0, 0,
 	"[-DU] " CMD_TARGET_WINDOW_USAGE,
 	0,
-	cmd_rotate_window_key_binding,
-	NULL,
 	cmd_rotate_window_exec
 };
 
-void
-cmd_rotate_window_key_binding(struct cmd *self, int key)
-{
-	self->args = args_create(0);
-	if (key == ('o' | KEYC_ESCAPE))
-		args_set(self->args, 'D', NULL);
-}
-
 enum cmd_retval
-cmd_rotate_window_exec(struct cmd *self, struct cmd_ctx *ctx)
+cmd_rotate_window_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args		*args = self->args;
 	struct winlink		*wl;
@@ -55,7 +44,7 @@ cmd_rotate_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 	struct layout_cell	*lc;
 	u_int			 sx, sy, xoff, yoff;
 
-	if ((wl = cmd_find_window(ctx, args_get(args, 't'), NULL)) == NULL)
+	if ((wl = cmd_find_window(cmdq, args_get(args, 't'), NULL)) == NULL)
 		return (CMD_RETURN_ERROR);
 	w = wl->window;
 

@@ -1,7 +1,6 @@
-/* $Id$ */
-
 /*
- * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2013 Dagobert Michelsen
+ * Copyright (c) 2013 Nicholas Marriott <nicm@users.sourceforge.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -16,29 +15,16 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/types.h>
+#include <string.h>
 
 #include "tmux.h"
 
-/*
- * Start the server and do nothing else.
- */
-
-enum cmd_retval	 cmd_start_server_exec(struct cmd *, struct cmd_ctx *);
-
-const struct cmd_entry cmd_start_server_entry = {
-	"start-server", "start",
-	"", 0, 0,
-	"",
-	CMD_STARTSERVER,
-	NULL,
-	NULL,
-	cmd_start_server_exec
-};
-
-/* ARGSUSED */
-enum cmd_retval
-cmd_start_server_exec(unused struct cmd *self, unused struct cmd_ctx *ctx)
+void
+cfmakeraw(struct termios *tio)
 {
-	return (CMD_RETURN_NORMAL);
+	tio->c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL|IXON);
+	tio->c_oflag &= ~OPOST;
+	tio->c_lflag &= ~(ECHO|ECHONL|ICANON|ISIG|IEXTEN);
+	tio->c_cflag &= ~(CSIZE|PARENB);
+	tio->c_cflag |= CS8;
 }

@@ -1,6 +1,12 @@
 *.o
 *~
+*.diff
+*.patch
+*.core
+core
+tags
 .deps/
+compat/.dirstamp
 aclocal.m4
 autom4te.cache/
 config.log
@@ -10,3 +16,4 @@ tmux
 Makefile
 Makefile.in
 configure
+tmux.1.*

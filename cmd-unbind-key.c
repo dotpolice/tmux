@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $OpenBSD$ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -26,65 +26,76 @@
  * Unbind key from command.
  */
 
-enum cmd_retval	 cmd_unbind_key_check(struct args *);
-enum cmd_retval	 cmd_unbind_key_exec(struct cmd *, struct cmd_ctx *);
-enum cmd_retval	 cmd_unbind_key_table(struct cmd *, struct cmd_ctx *, int);
+enum cmd_retval	 cmd_unbind_key_exec(struct cmd *, struct cmd_q *);
+enum cmd_retval	 cmd_unbind_key_mode_table(struct cmd *, struct cmd_q *, int);
 
 const struct cmd_entry cmd_unbind_key_entry = {
 	"unbind-key", "unbind",
-	"acnt:", 0, 1,
-	"[-acn] [-t key-table] key",
+	"acnt:T:", 0, 1,
+	"[-acn] [-t mode-table] [-T key-table] key",
 	0,
-	NULL,
-	cmd_unbind_key_check,
 	cmd_unbind_key_exec
 };
 
 enum cmd_retval
-cmd_unbind_key_check(struct args *args)
+cmd_unbind_key_exec(struct cmd *self, struct cmd_q *cmdq)
 {
-	if (args_has(args, 'a') && args->argc != 0)
-		return (CMD_RETURN_ERROR);
-	if (!args_has(args, 'a') && args->argc != 1)
-		return (CMD_RETURN_ERROR);
-	return (CMD_RETURN_NORMAL);
-}
-
-enum cmd_retval
-cmd_unbind_key_exec(struct cmd *self, unused struct cmd_ctx *ctx)
-{
-	struct args		*args = self->args;
-	struct key_binding	*bd;
-	int			 key;
+	struct args	*args = self->args;
+	int		 key;
+	const char	*tablename;
 
 	if (!args_has(args, 'a')) {
-		key = key_string_lookup_string(args->argv[0]);
-		if (key == KEYC_NONE) {
-			ctx->error(ctx, "unknown key: %s", args->argv[0]);
+		if (args->argc != 1) {
+			cmdq_error(cmdq, "missing key");
 			return (CMD_RETURN_ERROR);
 		}
-	} else
+		key = key_string_lookup_string(args->argv[0]);
+		if (key == KEYC_NONE) {
+			cmdq_error(cmdq, "unknown key: %s", args->argv[0]);
+			return (CMD_RETURN_ERROR);
+		}
+	} else {
+		if (args->argc != 0) {
+			cmdq_error(cmdq, "key given with -a");
+			return (CMD_RETURN_ERROR);
+		}
 		key = KEYC_NONE;
+	}
 
 	if (args_has(args, 't'))
-		return (cmd_unbind_key_table(self, ctx, key));
+		return (cmd_unbind_key_mode_table(self, cmdq, key));
 
 	if (key == KEYC_NONE) {
-		while (!RB_EMPTY(&key_bindings)) {
-			bd = RB_ROOT(&key_bindings);
-			key_bindings_remove(bd->key);
+		tablename = args_get(args, 'T');
+		if (tablename == NULL) {
+			key_bindings_remove_table("root");
+			key_bindings_remove_table("prefix");
+			return (CMD_RETURN_NORMAL);
 		}
+		if (key_bindings_get_table(tablename, 0) == NULL) {
+			cmdq_error(cmdq, "table %s doesn't exist", tablename);
+			return (CMD_RETURN_ERROR);
+		}
+		key_bindings_remove_table(tablename);
 		return (CMD_RETURN_NORMAL);
 	}
 
-	if (!args_has(args, 'n'))
-		key |= KEYC_PREFIX;
-	key_bindings_remove(key);
+	if (args_has(args, 'T')) {
+		tablename = args_get(args, 'T');
+		if (key_bindings_get_table(tablename, 0) == NULL) {
+			cmdq_error(cmdq, "table %s doesn't exist", tablename);
+			return (CMD_RETURN_ERROR);
+		}
+	} else if (args_has(args, 'n'))
+		tablename = "root";
+	else
+		tablename = "prefix";
+	key_bindings_remove(tablename, key);
 	return (CMD_RETURN_NORMAL);
 }
 
 enum cmd_retval
-cmd_unbind_key_table(struct cmd *self, struct cmd_ctx *ctx, int key)
+cmd_unbind_key_mode_table(struct cmd *self, struct cmd_q *cmdq, int key)
 {
 	struct args			*args = self->args;
 	const char			*tablename;
@@ -93,7 +104,7 @@ cmd_unbind_key_table(struct cmd *self, struct cmd_ctx *ctx, int key)
 
 	tablename = args_get(args, 't');
 	if ((mtab = mode_key_findtable(tablename)) == NULL) {
-		ctx->error(ctx, "unknown key table: %s", tablename);
+		cmdq_error(cmdq, "unknown key table: %s", tablename);
 		return (CMD_RETURN_ERROR);
 	}
 

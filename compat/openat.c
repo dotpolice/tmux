@@ -1,7 +1,5 @@
-/* $Id$ */
-
 /*
- * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2013 Nicholas Marriott <nicm@users.sourceforge.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -16,34 +14,48 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/types.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdarg.h>
+#include <unistd.h>
 
 #include "tmux.h"
 
-/*
- * List all commands with usages.
- */
-
-enum cmd_retval	 cmd_list_commands_exec(struct cmd *, struct cmd_ctx *);
-
-const struct cmd_entry cmd_list_commands_entry = {
-	"list-commands", "lscm",
-	"", 0, 0,
-	"",
-	0,
-	NULL,
-	NULL,
-	cmd_list_commands_exec
-};
-
-/* ARGSUSED */
-enum cmd_retval
-cmd_list_commands_exec(unused struct cmd *self, struct cmd_ctx *ctx)
+int
+openat(int fd, const char *path, int flags, ...)
 {
-	const struct cmd_entry 	      **entryp;
+	mode_t	mode;
+	va_list ap;
+	int	dotfd, retval, saved_errno;
 
-	for (entryp = cmd_table; *entryp != NULL; entryp++)
-		ctx->print(ctx, "%s %s", (*entryp)->name, (*entryp)->usage);
+	if (flags & O_CREAT) {
+		va_start(ap, flags);
+		mode = va_arg(ap, mode_t);
+		va_end(ap);
+	} else
+		mode = 0;
 
-	return (CMD_RETURN_NORMAL);
+	dotfd = -1;
+	if (fd != AT_FDCWD) {
+		dotfd = open(".", O_RDONLY);
+		if (dotfd == -1)
+			return (-1);
+		if (fchdir(fd) != 0)
+			return (-1);
+	}
+
+	retval = open(path, flags, mode);
+
+	if (dotfd != -1) {
+		if (fchdir(dotfd) != 0) {
+			saved_errno = errno;
+			close(retval);
+			close(dotfd);
+			errno = saved_errno;
+			return (-1);
+		}
+		close(dotfd);
+	}
+
+	return (retval);
 }

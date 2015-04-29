@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $OpenBSD$ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -29,9 +29,7 @@
  * Prompt for command in client.
  */
 
-void	cmd_command_prompt_key_binding(struct cmd *, int);
-int	cmd_command_prompt_check(struct args *);
-enum cmd_retval	cmd_command_prompt_exec(struct cmd *, struct cmd_ctx *);
+enum cmd_retval	cmd_command_prompt_exec(struct cmd *, struct cmd_q *);
 
 int	cmd_command_prompt_callback(void *, const char *);
 void	cmd_command_prompt_free(void *);
@@ -41,8 +39,6 @@ const struct cmd_entry cmd_command_prompt_entry = {
 	"I:p:t:", 0, 1,
 	"[-I inputs] [-p prompts] " CMD_TARGET_CLIENT_USAGE " [template]",
 	0,
-	cmd_command_prompt_key_binding,
-	NULL,
 	cmd_command_prompt_exec
 };
 
@@ -56,36 +52,8 @@ struct cmd_command_prompt_cdata {
 	int		 idx;
 };
 
-void
-cmd_command_prompt_key_binding(struct cmd *self, int key)
-{
-	switch (key) {
-	case '$':
-		self->args = args_create(1, "rename-session '%%'");
-		args_set(self->args, 'I', "#S");
-		break;
-	case ',':
-		self->args = args_create(1, "rename-window '%%'");
-		args_set(self->args, 'I', "#W");
-		break;
-	case '.':
-		self->args = args_create(1, "move-window -t '%%'");
-		break;
-	case 'f':
-		self->args = args_create(1, "find-window '%%'");
-		break;
-	case '\'':
-		self->args = args_create(1, "select-window -t ':%%'");
-		args_set(self->args, 'p', "index");
-		break;
-	default:
-		self->args = args_create(0);
-		break;
-	}
-}
-
 enum cmd_retval
-cmd_command_prompt_exec(struct cmd *self, struct cmd_ctx *ctx)
+cmd_command_prompt_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args			*args = self->args;
 	const char			*inputs, *prompts;
@@ -94,7 +62,7 @@ cmd_command_prompt_exec(struct cmd *self, struct cmd_ctx *ctx)
 	char				*prompt, *ptr, *input = NULL;
 	size_t				 n;
 
-	if ((c = cmd_find_client(ctx, args_get(args, 't'))) == NULL)
+	if ((c = cmd_find_client(cmdq, args_get(args, 't'), 0)) == NULL)
 		return (CMD_RETURN_ERROR);
 
 	if (c->prompt_string != NULL)
@@ -150,7 +118,6 @@ cmd_command_prompt_callback(void *data, const char *s)
 	struct cmd_command_prompt_cdata	*cdata = data;
 	struct client			*c = cdata->c;
 	struct cmd_list			*cmdlist;
-	struct cmd_ctx			 ctx;
 	char				*cause, *new_template, *prompt, *ptr;
 	char				*input = NULL;
 
@@ -175,7 +142,7 @@ cmd_command_prompt_callback(void *data, const char *s)
 		return (1);
 	}
 
-	if (cmd_string_parse(new_template, &cmdlist, &cause) != 0) {
+	if (cmd_string_parse(new_template, &cmdlist, NULL, 0, &cause) != 0) {
 		if (cause != NULL) {
 			*cause = toupper((u_char) *cause);
 			status_message_set(c, "%s", cause);
@@ -184,16 +151,7 @@ cmd_command_prompt_callback(void *data, const char *s)
 		return (0);
 	}
 
-	ctx.msgdata = NULL;
-	ctx.curclient = c;
-
-	ctx.error = key_bindings_error;
-	ctx.print = key_bindings_print;
-	ctx.info = key_bindings_info;
-
-	ctx.cmdclient = NULL;
-
-	cmd_list_exec(cmdlist, &ctx);
+	cmdq_run(c->cmdq, cmdlist, NULL);
 	cmd_list_free(cmdlist);
 
 	if (c->prompt_callbackfn != (void *) &cmd_command_prompt_callback)

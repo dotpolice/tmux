@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $OpenBSD$ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -59,7 +59,8 @@ cmd_string_ungetc(size_t *p)
  * string, or NULL for empty command.
  */
 int
-cmd_string_parse(const char *s, struct cmd_list **cmdlist, char **cause)
+cmd_string_parse(const char *s, struct cmd_list **cmdlist, const char *file,
+    u_int line, char **cause)
 {
 	size_t		p;
 	int		ch, i, argc, rval;
@@ -106,10 +107,11 @@ cmd_string_parse(const char *s, struct cmd_list **cmdlist, char **cause)
 		case ' ':
 		case '\t':
 			if (buf != NULL) {
-				buf = xrealloc(buf, 1, len + 1);
+				buf = xrealloc(buf, len + 1);
 				buf[len] = '\0';
 
-				argv = xrealloc(argv, argc + 1, sizeof *argv);
+				argv = xreallocarray(argv, argc + 1,
+				    sizeof *argv);
 				argv[argc++] = buf;
 
 				buf = NULL;
@@ -131,7 +133,7 @@ cmd_string_parse(const char *s, struct cmd_list **cmdlist, char **cause)
 			if (argc == 0)
 				goto out;
 
-			*cmdlist = cmd_list_parse(argc, argv, cause);
+			*cmdlist = cmd_list_parse(argc, argv, file, line, cause);
 			if (*cmdlist == NULL)
 				goto out;
 
@@ -150,7 +152,7 @@ cmd_string_parse(const char *s, struct cmd_list **cmdlist, char **cause)
 			if (len >= SIZE_MAX - 2)
 				goto error;
 
-			buf = xrealloc(buf, 1, len + 1);
+			buf = xrealloc(buf, len + 1);
 			buf[len++] = ch;
 			break;
 		}
@@ -178,7 +180,7 @@ cmd_string_copy(char **dst, char *src, size_t *len)
 
 	srclen = strlen(src);
 
-	*dst = xrealloc(*dst, 1, *len + srclen + 1);
+	*dst = xrealloc(*dst, *len + srclen + 1);
 	strlcpy(*dst + *len, src, srclen + 1);
 
 	*len += srclen;
@@ -230,11 +232,11 @@ cmd_string_string(const char *s, size_t *p, char endch, int esc)
 
 		if (len >= SIZE_MAX - 2)
 			goto error;
-		buf = xrealloc(buf, 1, len + 1);
+		buf = xrealloc(buf, len + 1);
 		buf[len++] = ch;
 	}
 
-	buf = xrealloc(buf, 1, len + 1);
+	buf = xrealloc(buf, len + 1);
 	buf[len] = '\0';
 	return (buf);
 
@@ -277,7 +279,7 @@ cmd_string_variable(const char *s, size_t *p)
 			return (t);
 		}
 
-		buf = xrealloc(buf, 1, len + 1);
+		buf = xrealloc(buf, len + 1);
 		buf[len++] = ch;
 
 		for (;;) {
@@ -287,7 +289,7 @@ cmd_string_variable(const char *s, size_t *p)
 			else {
 				if (len >= SIZE_MAX - 3)
 					goto error;
-				buf = xrealloc(buf, 1, len + 1);
+				buf = xrealloc(buf, len + 1);
 				buf[len++] = ch;
 			}
 		}
@@ -298,7 +300,7 @@ cmd_string_variable(const char *s, size_t *p)
 	if (ch != EOF && fch != '{')
 		cmd_string_ungetc(p); /* ch */
 
-	buf = xrealloc(buf, 1, len + 1);
+	buf = xrealloc(buf, len + 1);
 	buf[len] = '\0';
 
 	envent = environ_find(&global_environ, buf);
@@ -317,10 +319,13 @@ cmd_string_expand_tilde(const char *s, size_t *p)
 {
 	struct passwd		*pw;
 	struct environ_entry	*envent;
-	char			*home, *path, *username;
+	char			*home, *path, *user, *cp;
+	int			 last;
 
 	home = NULL;
-	if (cmd_string_getc(s, p) == '/') {
+
+	last = cmd_string_getc(s, p);
+	if (last == EOF || last == '/' || last == ' '|| last == '\t') {
 		envent = environ_find(&global_environ, "HOME");
 		if (envent != NULL && *envent->value != '\0')
 			home = envent->value;
@@ -328,15 +333,27 @@ cmd_string_expand_tilde(const char *s, size_t *p)
 			home = pw->pw_dir;
 	} else {
 		cmd_string_ungetc(p);
-		if ((username = cmd_string_string(s, p, '/', 0)) == NULL)
-			return (NULL);
-		if ((pw = getpwnam(username)) != NULL)
+
+		cp = user = xmalloc(strlen(s));
+		for (;;) {
+			last = cmd_string_getc(s, p);
+			if (last == EOF || last == '/' || last == ' '|| last == '\t')
+				break;
+			*cp++ = last;
+		}
+		*cp = '\0';
+
+		if ((pw = getpwnam(user)) != NULL)
 			home = pw->pw_dir;
-		free(username);
+		free(user);
 	}
+
 	if (home == NULL)
 		return (NULL);
 
-	xasprintf(&path, "%s/", home);
+	if (last != EOF)
+		xasprintf(&path, "%s%c", home, last);
+	else
+		xasprintf(&path, "%s", home);
 	return (path);
 }

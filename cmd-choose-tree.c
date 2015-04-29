@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $OpenBSD$ */
 
 /*
  * Copyright (c) 2012 Thomas Adam <thomas@xteddy.org>
@@ -32,19 +32,23 @@
  * Enter choice mode to choose a session and/or window.
  */
 
-enum cmd_retval	cmd_choose_tree_exec(struct cmd *, struct cmd_ctx *);
+#define CHOOSE_TREE_SESSION_TEMPLATE				\
+	"#{session_name}: #{session_windows} windows"		\
+	"#{?session_grouped, (group ,}"				\
+	"#{session_group}#{?session_grouped,),}"		\
+	"#{?session_attached, (attached),}"
+#define CHOOSE_TREE_WINDOW_TEMPLATE				\
+	"#{window_index}: #{window_name}#{window_flags} "	\
+	"\"#{pane_title}\""
 
-void	cmd_choose_tree_callback(struct window_choose_data *);
-void	cmd_choose_tree_free(struct window_choose_data *);
+enum cmd_retval	cmd_choose_tree_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_choose_tree_entry = {
 	"choose-tree", NULL,
 	"S:W:swub:c:t:", 0, 1,
-	"[-swu] [-b session-template] [-c window template] [-S format] " \
+	"[-suw] [-b session-template] [-c window template] [-S format] " \
 	"[-W format] " CMD_TARGET_WINDOW_USAGE,
 	0,
-	NULL,
-	NULL,
 	cmd_choose_tree_exec
 };
 
@@ -53,8 +57,6 @@ const struct cmd_entry cmd_choose_session_entry = {
 	"F:t:", 0, 1,
 	CMD_TARGET_WINDOW_USAGE " [-F format] [template]",
 	0,
-	NULL,
-	NULL,
 	cmd_choose_tree_exec
 };
 
@@ -63,17 +65,16 @@ const struct cmd_entry cmd_choose_window_entry = {
 	"F:t:", 0, 1,
 	CMD_TARGET_WINDOW_USAGE "[-F format] [template]",
 	0,
-	NULL,
-	NULL,
 	cmd_choose_tree_exec
 };
 
 enum cmd_retval
-cmd_choose_tree_exec(struct cmd *self, struct cmd_ctx *ctx)
+cmd_choose_tree_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args			*args = self->args;
 	struct winlink			*wl, *wm;
 	struct session			*s, *s2;
+	struct client			*c;
 	struct window_choose_data	*wcd = NULL;
 	const char			*ses_template, *win_template;
 	char				*final_win_action, *cur_win_template;
@@ -86,14 +87,12 @@ cmd_choose_tree_exec(struct cmd *self, struct cmd_ctx *ctx)
 	ses_template = win_template = NULL;
 	ses_action = win_action = NULL;
 
-	if (ctx->curclient == NULL) {
-		ctx->error(ctx, "must be run interactively");
+	if ((c = cmd_find_client(cmdq, NULL, 1)) == NULL) {
+		cmdq_error(cmdq, "no client available");
 		return (CMD_RETURN_ERROR);
 	}
 
-	s = ctx->curclient->session;
-
-	if ((wl = cmd_find_window(ctx, args_get(args, 't'), NULL)) == NULL)
+	if ((wl = cmd_find_window(cmdq, args_get(args, 't'), &s)) == NULL)
 		return (CMD_RETURN_ERROR);
 
 	if (window_pane_set_mode(wl->window->active, &window_choose_mode) != 0)
@@ -175,7 +174,7 @@ cmd_choose_tree_exec(struct cmd *self, struct cmd_ctx *ctx)
 		}
 
 		wcd = window_choose_add_session(wl->window->active,
-		    ctx, s2, ses_template, (char *)ses_action, idx_ses);
+		    c, s2, ses_template, ses_action, idx_ses);
 
 		/* If we're just choosing sessions, skip choosing windows. */
 		if (sflag && !wflag) {
@@ -204,8 +203,9 @@ windows_only:
 					cur_win = idx_ses;
 			}
 
-			xasprintf(&final_win_action, "%s ; %s", win_action,
-			    wcd ? wcd->command : "");
+			xasprintf(&final_win_action, "%s %s %s",
+			    wcd != NULL ? wcd->command : "",
+			    wcd != NULL ? ";" : "", win_action);
 
 			if (win_ses != win_max)
 				cur_win_template = final_win_template_middle;
@@ -213,7 +213,7 @@ windows_only:
 				cur_win_template = final_win_template_last;
 
 			window_choose_add_window(wl->window->active,
-			    ctx, s2, wm, cur_win_template,
+			    c, s2, wm, cur_win_template,
 			    final_win_action,
 			    (wflag && !sflag) ? win_ses : idx_ses);
 
@@ -230,35 +230,12 @@ windows_only:
 	free(final_win_template_middle);
 	free(final_win_template_last);
 
-	window_choose_ready(wl->window->active, cur_win,
-		cmd_choose_tree_callback, cmd_choose_tree_free);
+	window_choose_ready(wl->window->active, cur_win, NULL);
 
-	if (args_has(args, 'u'))
+	if (args_has(args, 'u')) {
 		window_choose_expand_all(wl->window->active);
+		window_choose_set_current(wl->window->active, cur_win);
+	}
 
 	return (CMD_RETURN_NORMAL);
-}
-
-void
-cmd_choose_tree_callback(struct window_choose_data *cdata)
-{
-	if (cdata == NULL)
-		return;
-
-	if (cdata->client->flags & CLIENT_DEAD)
-		return;
-
-	window_choose_ctx(cdata);
-}
-
-void
-cmd_choose_tree_free(struct window_choose_data *cdata)
-{
-	cdata->session->references--;
-	cdata->client->references--;
-
-	free(cdata->ft_template);
-	free(cdata->command);
-	format_free(cdata->ft);
-	free(cdata);
 }

@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $OpenBSD$ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -27,30 +27,56 @@
  * Send keys to client.
  */
 
-enum cmd_retval	 cmd_send_keys_exec(struct cmd *, struct cmd_ctx *);
+enum cmd_retval	 cmd_send_keys_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_send_keys_entry = {
 	"send-keys", "send",
-	"lRt:", 0, -1,
-	"[-lR] " CMD_TARGET_PANE_USAGE " key ...",
+	"lRMt:", 0, -1,
+	"[-lRM] " CMD_TARGET_PANE_USAGE " key ...",
 	0,
-	NULL,
-	NULL,
+	cmd_send_keys_exec
+};
+
+const struct cmd_entry cmd_send_prefix_entry = {
+	"send-prefix", NULL,
+	"2t:", 0, 0,
+	"[-2] " CMD_TARGET_PANE_USAGE,
+	0,
 	cmd_send_keys_exec
 };
 
 enum cmd_retval
-cmd_send_keys_exec(struct cmd *self, struct cmd_ctx *ctx)
+cmd_send_keys_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args		*args = self->args;
+	struct mouse_event	*m = &cmdq->item->mouse;
 	struct window_pane	*wp;
 	struct session		*s;
 	struct input_ctx	*ictx;
-	const char		*str;
+	const u_char		*str;
 	int			 i, key;
 
-	if (cmd_find_pane(ctx, args_get(args, 't'), &s, &wp) == NULL)
+	if (args_has(args, 'M')) {
+		wp = cmd_mouse_pane(m, &s, NULL);
+		if (wp == NULL) {
+			cmdq_error(cmdq, "no mouse target");
+			return (CMD_RETURN_ERROR);
+		}
+		window_pane_key(wp, NULL, s, m->key, m);
+		return (CMD_RETURN_NORMAL);
+	}
+
+	if (cmd_find_pane(cmdq, args_get(args, 't'), &s, &wp) == NULL)
 		return (CMD_RETURN_ERROR);
+
+	if (self->entry == &cmd_send_prefix_entry) {
+		if (args_has(args, '2'))
+			key = options_get_number(&s->options, "prefix2");
+		else
+			key = options_get_number(&s->options, "prefix");
+		window_pane_key(wp, NULL, s, key, NULL);
+		return (CMD_RETURN_NORMAL);
+	}
 
 	if (args_has(args, 'R')) {
 		ictx = &wp->ictx;
@@ -73,10 +99,10 @@ cmd_send_keys_exec(struct cmd *self, struct cmd_ctx *ctx)
 
 		if (!args_has(args, 'l') &&
 		    (key = key_string_lookup_string(str)) != KEYC_NONE) {
-			    window_pane_key(wp, s, key);
+			window_pane_key(wp, NULL, s, key, NULL);
 		} else {
 			for (; *str != '\0'; str++)
-			    window_pane_key(wp, s, *str);
+				window_pane_key(wp, NULL, s, *str, NULL);
 		}
 	}
 

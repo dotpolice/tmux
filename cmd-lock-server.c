@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $OpenBSD$ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -18,25 +18,19 @@
 
 #include <sys/types.h>
 
-#include <pwd.h>
-#include <string.h>
-#include <unistd.h>
-
 #include "tmux.h"
 
 /*
  * Lock commands.
  */
 
-enum cmd_retval	 cmd_lock_server_exec(struct cmd *, struct cmd_ctx *);
+enum cmd_retval	 cmd_lock_server_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_lock_server_entry = {
 	"lock-server", "lock",
 	"", 0, 0,
 	"",
 	0,
-	NULL,
-	NULL,
 	cmd_lock_server_exec
 };
 
@@ -45,8 +39,6 @@ const struct cmd_entry cmd_lock_session_entry = {
 	"t:", 0, 0,
 	CMD_TARGET_SESSION_USAGE,
 	0,
-	NULL,
-	NULL,
 	cmd_lock_server_exec
 };
 
@@ -55,14 +47,11 @@ const struct cmd_entry cmd_lock_client_entry = {
 	"t:", 0, 0,
 	CMD_TARGET_CLIENT_USAGE,
 	0,
-	NULL,
-	NULL,
 	cmd_lock_server_exec
 };
 
-/* ARGSUSED */
 enum cmd_retval
-cmd_lock_server_exec(struct cmd *self, unused struct cmd_ctx *ctx)
+cmd_lock_server_exec(struct cmd *self, unused struct cmd_q *cmdq)
 {
 	struct args	*args = self->args;
 	struct client	*c;
@@ -71,11 +60,13 @@ cmd_lock_server_exec(struct cmd *self, unused struct cmd_ctx *ctx)
 	if (self->entry == &cmd_lock_server_entry)
 		server_lock();
 	else if (self->entry == &cmd_lock_session_entry) {
-		if ((s = cmd_find_session(ctx, args_get(args, 't'), 0)) == NULL)
+		s = cmd_find_session(cmdq, args_get(args, 't'), 0);
+		if (s == NULL)
 			return (CMD_RETURN_ERROR);
 		server_lock_session(s);
 	} else {
-		if ((c = cmd_find_client(ctx, args_get(args, 't'))) == NULL)
+		c = cmd_find_client(cmdq, args_get(args, 't'), 0);
+		if (c == NULL)
 			return (CMD_RETURN_ERROR);
 		server_lock_client(c);
 	}

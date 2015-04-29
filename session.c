@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $OpenBSD$ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -29,7 +29,7 @@
 /* Global session list. */
 struct sessions	sessions;
 struct sessions dead_sessions;
-u_int		next_session;
+u_int		next_session_id;
 struct session_groups session_groups;
 
 struct winlink *session_next_alert(struct winlink *);
@@ -69,14 +69,30 @@ session_find(const char *name)
 	return (RB_FIND(sessions, &sessions, &s));
 }
 
-/* Find session by index. */
+/* Find session by id parsed from a string. */
 struct session *
-session_find_by_index(u_int idx)
+session_find_by_id_str(const char *s)
+{
+	const char	*errstr;
+	u_int		 id;
+
+	if (*s != '$')
+		return (NULL);
+
+	id = strtonum(s + 1, 0, UINT_MAX, &errstr);
+	if (errstr != NULL)
+		return (NULL);
+	return (session_find_by_id(id));
+}
+
+/* Find session by id. */
+struct session *
+session_find_by_id(u_int id)
 {
 	struct session	*s;
 
 	RB_FOREACH(s, sessions, &sessions) {
-		if (s->idx == idx)
+		if (s->id == id)
 			return (s);
 	}
 	return (NULL);
@@ -84,11 +100,12 @@ session_find_by_index(u_int idx)
 
 /* Create a new session. */
 struct session *
-session_create(const char *name, const char *cmd, const char *cwd,
-    struct environ *env, struct termios *tio, int idx, u_int sx, u_int sy,
-    char **cause)
+session_create(const char *name, int argc, char **argv, const char *path,
+    int cwd, struct environ *env, struct termios *tio, int idx, u_int sx,
+    u_int sy, char **cause)
 {
 	struct session	*s;
+	struct winlink	*wl;
 
 	s = xmalloc(sizeof *s);
 	s->references = 0;
@@ -98,7 +115,7 @@ session_create(const char *name, const char *cmd, const char *cwd,
 		fatal("gettimeofday failed");
 	session_update_activity(s);
 
-	s->cwd = xstrdup(cwd);
+	s->cwd = dup(cwd);
 
 	s->curw = NULL;
 	TAILQ_INIT(&s->lastw);
@@ -120,19 +137,20 @@ session_create(const char *name, const char *cmd, const char *cwd,
 
 	if (name != NULL) {
 		s->name = xstrdup(name);
-		s->idx = next_session++;
+		s->id = next_session_id++;
 	} else {
 		s->name = NULL;
 		do {
-			s->idx = next_session++;
-			free (s->name);
-			xasprintf(&s->name, "%u", s->idx);
+			s->id = next_session_id++;
+			free(s->name);
+			xasprintf(&s->name, "%u", s->id);
 		} while (RB_FIND(sessions, &sessions, s) != NULL);
 	}
 	RB_INSERT(sessions, &sessions, s);
 
-	if (cmd != NULL) {
-		if (session_new(s, NULL, cmd, cwd, idx, cause) == NULL) {
+	if (argc >= 0) {
+		wl = session_new(s, NULL, argc, argv, path, cwd, idx, cause);
+		if (wl == NULL) {
 			session_destroy(s);
 			return (NULL);
 		}
@@ -150,6 +168,7 @@ void
 session_destroy(struct session *s)
 {
 	struct winlink	*wl;
+
 	log_debug("session %s destroyed", s->name);
 
 	RB_REMOVE(sessions, &sessions, s);
@@ -169,16 +188,16 @@ session_destroy(struct session *s)
 		winlink_remove(&s->windows, wl);
 	}
 
-	free(s->cwd);
+	close(s->cwd);
 
 	RB_INSERT(sessions, &dead_sessions, s);
 }
 
-/* Check a session name is valid: not empty and no colons. */
+/* Check a session name is valid: not empty and no colons or periods. */
 int
 session_check_name(const char *name)
 {
-	return (*name != '\0' && strchr(name, ':') == NULL);
+	return (*name != '\0' && name[strcspn(name, ":.")] == '\0');
 }
 
 /* Update session active time. */
@@ -225,8 +244,8 @@ session_previous_session(struct session *s)
 
 /* Create a new window on a session. */
 struct winlink *
-session_new(struct session *s,
-    const char *name, const char *cmd, const char *cwd, int idx, char **cause)
+session_new(struct session *s, const char *name, int argc, char **argv,
+    const char *path, int cwd, int idx, char **cause)
 {
 	struct window	*w;
 	struct winlink	*wl;
@@ -249,8 +268,8 @@ session_new(struct session *s,
 		shell = _PATH_BSHELL;
 
 	hlimit = options_get_number(&s->options, "history-limit");
-	w = window_create(
-	    name, cmd, shell, cwd, &env, s->tio, s->sx, s->sy, hlimit, cause);
+	w = window_create(name, argc, argv, path, shell, cwd, &env, s->tio,
+	    s->sx, s->sy, hlimit, cause);
 	if (w == NULL) {
 		winlink_remove(&s->windows, wl);
 		environ_free(&env);
@@ -305,16 +324,16 @@ session_detach(struct session *s, struct winlink *wl)
 }
 
 /* Return if session has window. */
-struct winlink *
+int
 session_has(struct session *s, struct window *w)
 {
 	struct winlink	*wl;
 
 	RB_FOREACH(wl, winlinks, &s->windows) {
 		if (wl->window == w)
-			return (wl);
+			return (1);
 	}
-	return (NULL);
+	return (0);
 }
 
 struct winlink *
@@ -345,13 +364,7 @@ session_next(struct session *s, int alert)
 		if (alert && ((wl = session_next_alert(wl)) == NULL))
 			return (-1);
 	}
-	if (wl == s->curw)
-		return (1);
-	winlink_stack_remove(&s->lastw, wl);
-	winlink_stack_push(&s->lastw, s->curw);
-	s->curw = wl;
-	winlink_clear_flags(wl);
-	return (0);
+	return (session_set_current(s, wl));
 }
 
 struct winlink *
@@ -382,13 +395,7 @@ session_previous(struct session *s, int alert)
 		if (alert && (wl = session_previous_alert(wl)) == NULL)
 			return (-1);
 	}
-	if (wl == s->curw)
-		return (1);
-	winlink_stack_remove(&s->lastw, wl);
-	winlink_stack_push(&s->lastw, s->curw);
-	s->curw = wl;
-	winlink_clear_flags(wl);
-	return (0);
+	return (session_set_current(s, wl));
 }
 
 /* Move session to specific window. */
@@ -398,15 +405,7 @@ session_select(struct session *s, int idx)
 	struct winlink	*wl;
 
 	wl = winlink_find_by_index(&s->windows, idx);
-	if (wl == NULL)
-		return (-1);
-	if (wl == s->curw)
-		return (1);
-	winlink_stack_remove(&s->lastw, wl);
-	winlink_stack_push(&s->lastw, s->curw);
-	s->curw = wl;
-	winlink_clear_flags(wl);
-	return (0);
+	return (session_set_current(s, wl));
 }
 
 /* Move session to last used window. */
@@ -416,6 +415,18 @@ session_last(struct session *s)
 	struct winlink	*wl;
 
 	wl = TAILQ_FIRST(&s->lastw);
+	if (wl == NULL)
+		return (-1);
+	if (wl == s->curw)
+		return (1);
+
+	return (session_set_current(s, wl));
+}
+
+/* Set current winlink to wl .*/
+int
+session_set_current(struct session *s, struct winlink *wl)
+{
 	if (wl == NULL)
 		return (-1);
 	if (wl == s->curw)
@@ -494,6 +505,19 @@ session_group_remove(struct session *s)
 		TAILQ_REMOVE(&session_groups, sg, entry);
 		free(sg);
 	}
+}
+
+/* Count number of sessions in session group. */
+u_int
+session_group_count(struct session_group *sg)
+{
+	struct session	*s;
+	u_int		 n;
+
+	n = 0;
+	TAILQ_FOREACH(s, &sg->sessions, gentry)
+	    n++;
+	return (n);
 }
 
 /* Synchronize a session to its session group. */
@@ -583,8 +607,9 @@ session_group_synchronize1(struct session *target, struct session *s)
 	/* Then free the old winlinks list. */
 	while (!RB_EMPTY(&old_windows)) {
 		wl = RB_ROOT(&old_windows);
-		if (winlink_find_by_window_id(&s->windows, wl->window->id) == NULL)
-		    notify_window_unlinked(s, wl->window);
+		wl2 = winlink_find_by_window_id(&s->windows, wl->window->id);
+		if (wl2 == NULL)
+			notify_window_unlinked(s, wl->window);
 		winlink_remove(&old_windows, wl);
 	}
 }
@@ -622,7 +647,7 @@ session_renumber_windows(struct session *s)
 	memcpy(&old_lastw, &s->lastw, sizeof old_lastw);
 	TAILQ_INIT(&s->lastw);
 	TAILQ_FOREACH(wl, &old_lastw, sentry) {
-		wl_new = winlink_find_by_index(&s->windows, wl->idx);
+		wl_new = winlink_find_by_window(&s->windows, wl->window);
 		if (wl_new != NULL)
 			TAILQ_INSERT_TAIL(&s->lastw, wl_new, sentry);
 	}

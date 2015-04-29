@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $OpenBSD$ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -28,10 +28,14 @@
  * Find window containing text.
  */
 
-enum cmd_retval	 cmd_find_window_exec(struct cmd *, struct cmd_ctx *);
+#define FIND_WINDOW_TEMPLATE					\
+	"#{window_index}: #{window_name} "			\
+	"[#{window_width}x#{window_height}] "			\
+	"(#{window_panes} panes) #{window_find_matches}"
+
+enum cmd_retval	 cmd_find_window_exec(struct cmd *, struct cmd_q *);
 
 void	cmd_find_window_callback(struct window_choose_data *);
-void	cmd_find_window_free(struct window_choose_data *);
 
 /* Flags for determining matching behavior. */
 #define CMD_FIND_WINDOW_BY_TITLE   0x1
@@ -48,8 +52,6 @@ const struct cmd_entry cmd_find_window_entry = {
 	"F:CNt:T", 1, 4,
 	"[-CNT] [-F format] " CMD_TARGET_WINDOW_USAGE " match-string",
 	0,
-	NULL,
-	NULL,
 	cmd_find_window_exec
 };
 
@@ -86,7 +88,8 @@ cmd_find_window_match_flags(struct args *args)
 
 void
 cmd_find_window_match(struct cmd_find_window_data_list *find_list,
-    int match_flags, struct winlink *wl, const char *str, const char *searchstr)
+    int match_flags, struct winlink *wl, const char *str,
+    const char *searchstr)
 {
 	struct cmd_find_window_data	 find_data;
 	struct window_pane		*wp;
@@ -128,9 +131,10 @@ cmd_find_window_match(struct cmd_find_window_data_list *find_list,
 }
 
 enum cmd_retval
-cmd_find_window_exec(struct cmd *self, struct cmd_ctx *ctx)
+cmd_find_window_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args			*args = self->args;
+	struct client			*c;
 	struct window_choose_data	*cdata;
 	struct session			*s;
 	struct winlink			*wl, *wm;
@@ -139,13 +143,13 @@ cmd_find_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 	const char			*template;
 	u_int				 i, match_flags;
 
-	if (ctx->curclient == NULL) {
-		ctx->error(ctx, "must be run interactively");
+	if ((c = cmd_find_client(cmdq, NULL, 1)) == NULL) {
+		cmdq_error(cmdq, "no client available");
 		return (CMD_RETURN_ERROR);
 	}
-	s = ctx->curclient->session;
+	s = c->session;
 
-	if ((wl = cmd_find_window(ctx, args_get(args, 't'), NULL)) == NULL)
+	if ((wl = cmd_find_window(cmdq, args_get(args, 't'), NULL)) == NULL)
 		return (CMD_RETURN_ERROR);
 
 	if ((template = args_get(args, 'F')) == NULL)
@@ -158,11 +162,11 @@ cmd_find_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 
 	xasprintf(&searchstr, "*%s*", str);
 	RB_FOREACH(wm, winlinks, &s->windows)
-	    cmd_find_window_match (&find_list, match_flags, wm, str, searchstr);
+	    cmd_find_window_match(&find_list, match_flags, wm, str, searchstr);
 	free(searchstr);
 
 	if (ARRAY_LENGTH(&find_list) == 0) {
-		ctx->error(ctx, "no windows matching: %s", str);
+		cmdq_error(cmdq, "no windows matching: %s", str);
 		ARRAY_FREE(&find_list);
 		return (CMD_RETURN_ERROR);
 	}
@@ -180,9 +184,8 @@ cmd_find_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 	for (i = 0; i < ARRAY_LENGTH(&find_list); i++) {
 		wm = ARRAY_ITEM(&find_list, i).wl;
 
-		cdata = window_choose_data_create(ctx);
+		cdata = window_choose_data_create(TREE_OTHER, c, c->session);
 		cdata->idx = wm->idx;
-		cdata->client->references++;
 		cdata->wl = wm;
 
 		cdata->ft_template = xstrdup(template);
@@ -191,17 +194,16 @@ cmd_find_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 		format_add(cdata->ft, "line", "%u", i);
 		format_add(cdata->ft, "window_find_matches", "%s",
 		    ARRAY_ITEM(&find_list, i).list_ctx);
-		format_session(cdata->ft, s);
-		format_winlink(cdata->ft, s, wm);
-		format_window_pane(cdata->ft, wm->window->active);
+		format_defaults(cdata->ft, NULL, s, wm, NULL);
 
 		window_choose_add(wl->window->active, cdata);
 	}
 
-	window_choose_ready(wl->window->active,
-	    0, cmd_find_window_callback, cmd_find_window_free);
+	window_choose_ready(wl->window->active, 0, cmd_find_window_callback);
 
 out:
+	for (i = 0; i < ARRAY_LENGTH(&find_list); i++)
+		free(ARRAY_ITEM(&find_list, i).list_ctx);
 	ARRAY_FREE(&find_list);
 	return (CMD_RETURN_NORMAL);
 }
@@ -215,7 +217,7 @@ cmd_find_window_callback(struct window_choose_data *cdata)
 	if (cdata == NULL)
 		return;
 
-	s = cdata->session;
+	s = cdata->start_session;
 	if (!session_alive(s))
 		return;
 
@@ -227,17 +229,4 @@ cmd_find_window_callback(struct window_choose_data *cdata)
 		server_redraw_session(s);
 		recalculate_sizes();
 	}
-}
-
-void
-cmd_find_window_free(struct window_choose_data *cdata)
-{
-	if (cdata == NULL)
-		return;
-
-	cdata->session->references--;
-
-	free(cdata->ft_template);
-	format_free(cdata->ft);
-	free(cdata);
 }

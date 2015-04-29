@@ -1,4 +1,4 @@
-/* $Id$ */
+/* $OpenBSD$ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -28,20 +28,18 @@
  * Respawn a pane (restart the command). Kill existing if -k given.
  */
 
-enum cmd_retval	 cmd_respawn_pane_exec(struct cmd *, struct cmd_ctx *);
+enum cmd_retval	 cmd_respawn_pane_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_respawn_pane_entry = {
 	"respawn-pane", "respawnp",
-	"kt:", 0, 1,
+	"kt:", 0, -1,
 	"[-k] " CMD_TARGET_PANE_USAGE " [command]",
 	0,
-	NULL,
-	NULL,
 	cmd_respawn_pane_exec
 };
 
 enum cmd_retval
-cmd_respawn_pane_exec(struct cmd *self, struct cmd_ctx *ctx)
+cmd_respawn_pane_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args		*args = self->args;
 	struct winlink		*wl;
@@ -49,18 +47,19 @@ cmd_respawn_pane_exec(struct cmd *self, struct cmd_ctx *ctx)
 	struct window_pane	*wp;
 	struct session		*s;
 	struct environ		 env;
-	const char		*cmd;
+	const char		*path;
 	char			*cause;
 	u_int			 idx;
+	struct environ_entry	*envent;
 
-	if ((wl = cmd_find_pane(ctx, args_get(args, 't'), &s, &wp)) == NULL)
+	if ((wl = cmd_find_pane(cmdq, args_get(args, 't'), &s, &wp)) == NULL)
 		return (CMD_RETURN_ERROR);
 	w = wl->window;
 
 	if (!args_has(self->args, 'k') && wp->fd != -1) {
 		if (window_pane_index(wp, &idx) != 0)
 			fatalx("index not found");
-		ctx->error(ctx, "pane still active: %s:%u.%u",
+		cmdq_error(cmdq, "pane still active: %s:%d.%u",
 		    s->name, wl->idx, idx);
 		return (CMD_RETURN_ERROR);
 	}
@@ -74,12 +73,17 @@ cmd_respawn_pane_exec(struct cmd *self, struct cmd_ctx *ctx)
 	screen_reinit(&wp->base);
 	input_init(wp);
 
-	if (args->argc != 0)
-		cmd = args->argv[0];
+	path = NULL;
+	if (cmdq->client != NULL && cmdq->client->session == NULL)
+		envent = environ_find(&cmdq->client->environ, "PATH");
 	else
-		cmd = NULL;
-	if (window_pane_spawn(wp, cmd, NULL, NULL, &env, s->tio, &cause) != 0) {
-		ctx->error(ctx, "respawn pane failed: %s", cause);
+		envent = environ_find(&s->environ, "PATH");
+	if (envent != NULL)
+		path = envent->value;
+
+	if (window_pane_spawn(wp, args->argc, args->argv, path, NULL, -1, &env,
+	    s->tio, &cause) != 0) {
+		cmdq_error(cmdq, "respawn pane failed: %s", cause);
 		free(cause);
 		environ_free(&env);
 		return (CMD_RETURN_ERROR);
