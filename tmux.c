@@ -205,9 +205,9 @@ int
 main(int argc, char **argv)
 {
 	struct passwd	*pw;
-	char		*s, *path, *label, *config, **var, tmp[PATH_MAX];
+	char		*s, *path, *label, **var, tmp[PATH_MAX];
 	char		 in[256];
-	const char	*home;
+	const char	*config;
 	long long	 pid;
 	int	 	 opt, flags, keys, session;
 
